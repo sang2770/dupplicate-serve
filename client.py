@@ -1,6 +1,8 @@
 import requests
 import os
 from typing import Dict, Optional
+import sys
+sys.stdout.reconfigure(encoding="utf-8")
 
 def read_domain_from_file(file_path: str) -> Optional[str]:
     """Read the server domain from a file."""
@@ -10,11 +12,7 @@ def read_domain_from_file(file_path: str) -> Optional[str]:
             if domain:
                 return domain
             return None
-    except FileNotFoundError:
-        print(f"Error: Domain file '{file_path}' Không tìm thấy")
-        return None
-    except Exception as e:
-        print(f"Error reading domain file: {e}")
+    except:
         return None
 
 class DuplicateCheckerClient:
