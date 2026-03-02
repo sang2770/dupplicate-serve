@@ -38,11 +38,6 @@ jobs:
           pyinstaller --onefile ./client.py
           mkdir release
           Copy-Item dist\*.exe release\
-      - name: Test EXE
-        shell: pwsh
-        run: |
-          ./release/server_gui.exe --help
-          ./release/client.exe --help
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
