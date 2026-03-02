@@ -34,14 +34,14 @@ jobs:
       - name: Build EXE
         shell: pwsh
         run: |
-          pyinstaller --onefile ./server.py
+          pyinstaller --onefile ./server_gui.py
           pyinstaller --onefile ./client.py
           mkdir release
           Copy-Item dist\*.exe release\
       - name: Test EXE
         shell: pwsh
         run: |
-          ./release/server.exe --help
+          ./release/server_gui.exe --help
           ./release/client.exe --help
 
       - name: Create GitHub Release
