@@ -36,14 +36,15 @@ class DuplicateChecker:
         """Generate MD5 hash of data for duplicate checking."""
         return hashlib.md5(data.strip().encode('utf-8')).hexdigest()
     
-    def check_and_save_data(self, new_data_list: list) -> Dict[str, int]:
+    def check_and_save_data(self, new_data_list: list) -> Dict[str, Any]:
         """
         Check for duplicates and save non-duplicate data.
-        Returns statistics: {'success': count, 'duplicates': count}
+        Returns statistics and separated data lists.
         """
         success_count = 0
         duplicate_count = 0
         new_data_to_save = []
+        duplicate_data = []
         
         for data_item in new_data_list:
             data_str = str(data_item).strip()
@@ -54,6 +55,7 @@ class DuplicateChecker:
             
             if data_hash in self.existing_data:
                 duplicate_count += 1
+                duplicate_data.append(data_str)
             else:
                 # Not a duplicate, add to our tracking and prepare for saving
                 self.existing_data.add(data_hash)
@@ -67,7 +69,9 @@ class DuplicateChecker:
         return {
             'success': success_count,
             'duplicates': duplicate_count,
-            'total_processed': len(new_data_list)
+            'total_processed': len(new_data_list),
+            'new_data': new_data_to_save,
+            'duplicate_data': duplicate_data
         }
     
     def _save_data(self, data_list: list):
@@ -116,6 +120,8 @@ def upload_file():
         return jsonify({
             'status': 'success',
             'statistics': stats,
+            'new_data': stats['new_data'],
+            'duplicate_data': stats['duplicate_data'],
             'message': f'Processed {stats["total_processed"]} items from file: {stats["success"]} new, {stats["duplicates"]} duplicates'
         })
         

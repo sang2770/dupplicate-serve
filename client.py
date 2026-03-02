@@ -5,7 +5,7 @@ import requests
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton,
-    QLabel, QFileDialog, QTextEdit, QMessageBox
+    QLabel, QFileDialog, QTextEdit, QMessageBox, QHBoxLayout
 )
 from PyQt6.QtCore import Qt
 
@@ -74,9 +74,26 @@ class MainWindow(QWidget):
         self.upload_button.clicked.connect(self.select_file)
         layout.addWidget(self.upload_button)
 
+        # Button layout for save options
+        button_layout = QHBoxLayout()
+        self.save_new_button = QPushButton("💾 Lưu dữ liệu mới")
+        self.save_new_button.clicked.connect(self.save_new_data)
+        self.save_new_button.setEnabled(False)
+        button_layout.addWidget(self.save_new_button)
+        
+        self.save_duplicate_button = QPushButton("💾 Lưu dữ liệu trùng")
+        self.save_duplicate_button.clicked.connect(self.save_duplicate_data)
+        self.save_duplicate_button.setEnabled(False)
+        button_layout.addWidget(self.save_duplicate_button)
+        
+        layout.addLayout(button_layout)
+
         self.result_area = QTextEdit()
         self.result_area.setReadOnly(True)
         layout.addWidget(self.result_area)
+        
+        # Store the last result for saving
+        self.last_result = None
 
         self.setLayout(layout)
 
@@ -102,6 +119,7 @@ class MainWindow(QWidget):
 
     def show_result(self, result: Dict):
         if result and 'statistics' in result:
+            self.last_result = result
             stats = result['statistics']
 
             output = (
@@ -111,12 +129,74 @@ class MainWindow(QWidget):
                 f"Mục mới: {stats['success']}\n"
                 f"Trùng lặp: {stats['duplicates']}\n"
                 f"Tỷ lệ thành công: "
-                f"{stats['success']/stats['total_processed']*100:.1f}%\n"
+                f"{stats['success']/stats['total_processed']*100:.1f}%\n\n"
             )
+            
+            # Show preview of new data
+            if 'new_data' in result and result['new_data']:
+                output += "DỮ LIỆU MỚI (5 dòng đầu):\n"
+                for i, line in enumerate(result['new_data'][:5]):
+                    output += f"{i+1}. {line}\n"
+                if len(result['new_data']) > 5:
+                    output += f"... và {len(result['new_data']) - 5} dòng khác\n\n"
+            
+            # Show preview of duplicate data
+            if 'duplicate_data' in result and result['duplicate_data']:
+                output += "DỮ LIỆU TRÙNG LẶP (5 dòng đầu):\n"
+                for i, line in enumerate(result['duplicate_data'][:5]):
+                    output += f"{i+1}. {line}\n"
+                if len(result['duplicate_data']) > 5:
+                    output += f"... và {len(result['duplicate_data']) - 5} dòng khác\n"
 
             self.result_area.setText(output)
+            
+            # Enable save buttons
+            self.save_new_button.setEnabled(bool(result.get('new_data')))
+            self.save_duplicate_button.setEnabled(bool(result.get('duplicate_data')))
         else:
             QMessageBox.warning(self, "Lỗi", "Không nhận được kết quả hợp lệ")
+    
+    def save_new_data(self):
+        if not self.last_result or 'new_data' not in self.last_result:
+            QMessageBox.warning(self, "Lỗi", "Không có dữ liệu mới để lưu")
+            return
+            
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Lưu dữ liệu mới",
+            "new_data.txt",
+            "Text Files (*.txt)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    for line in self.last_result['new_data']:
+                        f.write(f"{line}\n")
+                QMessageBox.information(self, "Thành công", f"Đã lưu {len(self.last_result['new_data'])} dòng dữ liệu mới")
+            except Exception as e:
+                QMessageBox.critical(self, "Lỗi", f"Không thể lưu file: {str(e)}")
+    
+    def save_duplicate_data(self):
+        if not self.last_result or 'duplicate_data' not in self.last_result:
+            QMessageBox.warning(self, "Lỗi", "Không có dữ liệu trùng lặp để lưu")
+            return
+            
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Lưu dữ liệu trùng lặp",
+            "duplicate_data.txt",
+            "Text Files (*.txt)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    for line in self.last_result['duplicate_data']:
+                        f.write(f"{line}\n")
+                QMessageBox.information(self, "Thành công", f"Đã lưu {len(self.last_result['duplicate_data'])} dòng dữ liệu trùng lặp")
+            except Exception as e:
+                QMessageBox.critical(self, "Lỗi", f"Không thể lưu file: {str(e)}")
 
 
 if __name__ == "__main__":
