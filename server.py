@@ -6,6 +6,8 @@ import sqlite3
 import threading
 import time
 import re
+import uuid
+from datetime import datetime, timedelta
 from typing import Set, Dict, Any, Iterator, Tuple, List
 from contextlib import contextmanager
 
@@ -37,24 +39,157 @@ class OptimizedDuplicateChecker:
             
             # Create index for faster lookups
             conn.execute('CREATE INDEX IF NOT EXISTS idx_hash ON data_hashes(hash)')
+            
+            # Create license keys table
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS license_keys (
+                    key_id TEXT PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL,
+                    is_active BOOLEAN DEFAULT 1
+                )
+            ''')
+            
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_license_key ON license_keys(key_id)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_username ON license_keys(username)')
             conn.commit()
     
-    def _validate_data_format(self, data: str) -> Dict[str, Any]:
-        """Validate data format: 6 digits|username|20 chars with commas and spaces."""
-        pattern = r'^\d{6}\|\w+\|[\w\s,]{1,20}$'
-        
-        if re.match(pattern, data.strip()):
-            parts = data.strip().split('|')
-            if len(parts) == 3:
-                # Additional validation
-                numbers, username, content = parts
-                if (len(numbers) == 6 and numbers.isdigit() and 
-                    len(username) > 0 and len(content) <= 20 and 
-                    (',' in content or ' ' in content)):
-                    return {'valid': True, 'data': data.strip()}
-        
-        return {'valid': False, 'data': data.strip(), 'error': 'Invalid format. Expected: 6digits|username|text(max20chars with commas/spaces)'}
+    def create_license_key(self, username: str, days_valid: int = 30) -> Dict[str, Any]:
+        """Create a new license key for a user."""
+        try:
+            key_id = str(uuid.uuid4())
+            expires_at = datetime.now() + timedelta(days=days_valid)
+            
+            with self._get_db_connection() as conn:
+                conn.execute('''
+                    INSERT INTO license_keys (key_id, username, expires_at)
+                    VALUES (?, ?, ?)
+                ''', (key_id, username, expires_at.isoformat()))
+                conn.commit()
+            
+            return {
+                'success': True,
+                'key_id': key_id,
+                'username': username,
+                'expires_at': expires_at.isoformat(),
+                'days_valid': days_valid
+            }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
     
+    def validate_license_key(self, key_id: str) -> Dict[str, Any]:
+        """Validate a license key and return user info."""
+        try:
+            with self._get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT username, expires_at, is_active 
+                    FROM license_keys 
+                    WHERE key_id = ?
+                ''', (key_id,))
+                
+                result = cursor.fetchone()
+                if not result:
+                    return {'valid': False, 'error': 'License key not found'}
+                
+                username, expires_at_str, is_active = result
+                expires_at = datetime.fromisoformat(expires_at_str)
+                
+                if not is_active:
+                    return {'valid': False, 'error': 'License key is deactivated'}
+                
+                if datetime.now() > expires_at:
+                    return {'valid': False, 'error': 'License key has expired'}
+                
+                return {
+                    'valid': True,
+                    'username': username,
+                    'expires_at': expires_at_str,
+                    'days_remaining': (expires_at - datetime.now()).days
+                }
+        except Exception as e:
+            return {'valid': False, 'error': f'Validation error: {str(e)}'}
+    
+    def list_all_licenses(self) -> List[Dict[str, Any]]:
+        """List all license keys in the database."""
+        try:
+            with self._get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT key_id, username, created_at, expires_at, is_active 
+                    FROM license_keys 
+                    ORDER BY created_at DESC
+                ''')
+                
+                licenses = []
+                for row in cursor.fetchall():
+                    key_id, username, created_at, expires_at_str, is_active = row
+                    expires_at = datetime.fromisoformat(expires_at_str)
+                    now = datetime.now()
+                    
+                    days_remaining = (expires_at - now).days
+                    is_expired = now > expires_at
+                    
+                    licenses.append({
+                        'key_id': key_id,
+                        'username': username,
+                        'created_at': created_at,
+                        'expires_at': expires_at_str,
+                        'is_active': bool(is_active),
+                        'is_expired': is_expired,
+                        'days_remaining': days_remaining,
+                        'status': 'Expired' if is_expired else ('Inactive' if not is_active else f'{days_remaining} days left')
+                    })
+                
+                return licenses
+        except Exception as e:
+            return []
+    
+    def remove_license_key(self, key_id: str) -> Dict[str, Any]:
+        """Remove a license key from the database."""
+        try:
+            with self._get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                # First check if license exists
+                cursor.execute('SELECT username FROM license_keys WHERE key_id = ?', (key_id,))
+                result = cursor.fetchone()
+                
+                if not result:
+                    return {'success': False, 'error': 'License key not found'}
+                
+                username = result[0]
+                
+                # Delete the license
+                cursor.execute('DELETE FROM license_keys WHERE key_id = ?', (key_id,))
+                conn.commit()
+                
+                if cursor.rowcount > 0:
+                    return {
+                        'success': True,
+                        'message': f'License key for user "{username}" has been removed',
+                        'username': username
+                    }
+                else:
+                    return {'success': False, 'error': 'Failed to remove license key'}
+                
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+    
+    def _validate_data_format(self, data: str) -> Dict[str, Any]:
+        """Validate data format: only 6 digits are required."""
+        data_clean = data.strip()
+        
+        # Check if it's exactly 6 digits
+        if re.match(r'^\d{6}$', data_clean):
+            return {'valid': True, 'data': data_clean}
+        
+        return {
+            'valid': False, 
+            'data': data_clean, 
+            'error': 'Invalid format. Expected: exactly 6 digits'
+        }
 
     
     def _insert_batch(self, conn: sqlite3.Connection, batch: list):
@@ -113,8 +248,8 @@ class OptimizedDuplicateChecker:
             
             yield batch_data, batch_hashes, list(zip(batch_hashes, batch_data))
     
-    def check_and_save_data(self, new_data_list: list) -> Dict[str, Any]:
-        """Efficiently check for duplicates, validate format, and save data."""
+    def check_and_save_data(self, new_data_list: list, username: str = "unknown", save_data: bool = True) -> Dict[str, Any]:
+        """Efficiently check for duplicates, validate format, and optionally save data."""
         with self._lock:
             total_processed = 0
             success_count = 0
@@ -144,7 +279,7 @@ class OptimizedDuplicateChecker:
                 if not batch_data:
                     continue
                 
-                # Check which hashes exist
+                # Check which hashes exist (check only the 6 digits part)
                 hash_exists = self._check_hashes_exist(batch_hashes)
                 
                 # Separate new and duplicate data
@@ -159,10 +294,15 @@ class OptimizedDuplicateChecker:
                         success_count += 1
                         new_data_result.append(data_str)
                         new_batch.append(data_str)
-                        new_hash_pairs.append((data_hash, data_str))
+                        
+                        # If saving data, format as: 6digits|username|timestamp
+                        if save_data:
+                            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            full_data = f"{data_str}|{username}|{timestamp}"
+                            new_hash_pairs.append((data_hash, full_data))
                 
-                # Save new data to database only
-                if new_hash_pairs:
+                # Save new data to database only if save_data is True
+                if save_data and new_hash_pairs:
                     self._save_new_data_to_db(new_hash_pairs)
                 
                 # Print progress for large datasets
@@ -177,7 +317,8 @@ class OptimizedDuplicateChecker:
                 'total_processed': total_processed,
                 'new_data': new_data_result,
                 'duplicate_data': duplicate_data_result,
-                'invalid_data': invalid_data_result
+                'invalid_data': invalid_data_result,
+                'save_mode': save_data
             }
     
     def _save_new_data_to_db(self, hash_pairs: list):
@@ -233,6 +374,101 @@ class OptimizedDuplicateChecker:
 # Initialize optimized duplicate checker (database only)
 checker = OptimizedDuplicateChecker(DB_FILE)
 
+@app.route('/create-license', methods=['POST'])
+def create_license():
+    """Create a new license key for a user."""
+    try:
+        data = request.get_json() or {}
+        username = data.get('username')
+        days_valid = data.get('days_valid', 30)
+        
+        if not username:
+            return jsonify({'error': 'Username is required'}), 400
+        
+        result = checker.create_license_key(username, days_valid)
+        
+        if result['success']:
+            return jsonify({
+                'status': 'success',
+                'license_key': result['key_id'],
+                'username': result['username'],
+                'expires_at': result['expires_at'],
+                'days_valid': result['days_valid'],
+                'message': f'License key created for {username}, valid for {days_valid} days'
+            })
+        else:
+            return jsonify({'error': f'Failed to create license: {result["error"]}'}), 500
+            
+    except Exception as e:
+        return jsonify({'error': f'License creation error: {str(e)}'}), 500
+
+@app.route('/validate-license', methods=['POST'])
+def validate_license():
+    """Validate a license key."""
+    try:
+        data = request.get_json() or {}
+        key_id = data.get('key_id')
+        
+        if not key_id:
+            return jsonify({'error': 'License key is required'}), 400
+        
+        result = checker.validate_license_key(key_id)
+        
+        if result['valid']:
+            return jsonify({
+                'status': 'success',
+                'valid': True,
+                'username': result['username'],
+                'expires_at': result['expires_at'],
+                'days_remaining': result['days_remaining']
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'valid': False,
+                'error': result['error']
+            }), 403
+            
+    except Exception as e:
+        return jsonify({'error': f'License validation error: {str(e)}'}), 500
+
+@app.route('/list-licenses', methods=['GET'])
+def list_licenses():
+    """List all license keys."""
+    try:
+        licenses = checker.list_all_licenses()
+        return jsonify({
+            'status': 'success',
+            'licenses': licenses,
+            'count': len(licenses)
+        })
+    except Exception as e:
+        return jsonify({'error': f'Error listing licenses: {str(e)}'}), 500
+
+@app.route('/remove-license', methods=['DELETE'])
+def remove_license():
+    """Remove a license key."""
+    try:
+        data = request.get_json() or {}
+        key_id = data.get('key_id')
+        
+        if not key_id:
+            return jsonify({'error': 'License key is required'}), 400
+        
+        result = checker.remove_license_key(key_id)
+        
+        if result['success']:
+            return jsonify({
+                'status': 'success',
+                'message': result['message'],
+                'username': result['username']
+            })
+        else:
+            return jsonify({'error': result['error']}, 404)
+            
+    except Exception as e:
+        return jsonify({'error': f'Error removing license: {str(e)}'}), 500
+
 @app.route('/export-data', methods=['POST'])
 def export_data():
     """Export all database data to text file."""
@@ -255,6 +491,8 @@ def export_data():
             
     except Exception as e:
         return jsonify({'error': f'Export error: {str(e)}'}), 500
+
+@app.route('/stats', methods=['GET'])
 def get_stats():
     """Get system statistics."""
     try:
@@ -278,6 +516,22 @@ def upload_file():
     Each line in the file is treated as a separate data item.
     """
     try:
+        # Check for license key
+        license_key = request.headers.get('Authorization') or request.form.get('license_key')
+        if not license_key:
+            return jsonify({'error': 'License key is required'}), 401
+        
+        # Remove "Bearer " prefix if present
+        if license_key.startswith('Bearer '):
+            license_key = license_key[7:]
+        
+        # Validate license
+        license_result = checker.validate_license_key(license_key)
+        if not license_result['valid']:
+            return jsonify({'error': f'Invalid license: {license_result["error"]}'}), 403
+        
+        username = license_result['username']
+        
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
         
@@ -285,6 +539,10 @@ def upload_file():
         
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
+        
+        # Get upload mode (default is save mode)
+        upload_mode = request.form.get('mode', 'save')  # 'save' or 'check'
+        save_data = (upload_mode == 'save')
         
         # Read file content
         file_content = file.read().decode('utf-8')
@@ -294,7 +552,9 @@ def upload_file():
             return jsonify({'error': 'File is empty or contains no valid data'}), 400
         
         # Process the data
-        stats = checker.check_and_save_data(data_lines)
+        stats = checker.check_and_save_data(data_lines, username, save_data)
+        
+        mode_text = "saved" if save_data else "checked only"
         
         return jsonify({
             'status': 'success',
@@ -302,17 +562,24 @@ def upload_file():
             'new_data': stats['new_data'],
             'duplicate_data': stats['duplicate_data'],
             'invalid_data': stats['invalid_data'],
-            'message': f'Processed {stats["total_processed"]} items: {stats["success"]} new, {stats["duplicates"]} duplicates, {stats["invalid"]} invalid format'
+            'username': username,
+            'mode': upload_mode,
+            'message': f'Processed {stats["total_processed"]} items ({mode_text}): {stats["success"]} new, {stats["duplicates"]} duplicates, {stats["invalid"]} invalid format'
         })
         
     except Exception as e:
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    print("Công cụ kiểm tra dữ liệu trùng lặp...")
-    print("Danh sách các endpoint:")
-    print("  GET  /health - Kiểm tra trạng thái")
-    print("  POST /upload-file - Tải lên tệp văn bản")
+    print("Công cụ kiểm tra dữ liệu trùng lặp với license system...")
+    print("Danh sách các endpoint:")
+    print("  GET  /health - Kiểm tra trạng thái")
+    print("  POST /create-license - Tạo license key mới")
+    print("  POST /validate-license - Kiểm tra license key")
+    print("  GET  /list-licenses - Liệt kê tất cả license keys")
+    print("  DELETE /remove-license - Xóa license key")
+    print("  POST /upload-file - Tải lên tệp văn bản (cần license)")
+    print("  POST /export-data - Xuất dữ liệu")
     print("\nServer starting on http://localhost:5000")
     
     app.run(host='0.0.0.0', port=5000, debug=True)

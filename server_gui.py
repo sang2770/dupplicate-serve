@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
     QPushButton, QLabel, QTextEdit, QWidget, QFileDialog,
     QMessageBox, QProgressBar, QGroupBox, QGridLayout,
-    QLineEdit
+    QLineEdit, QScrollArea, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QIcon
@@ -71,27 +71,37 @@ class ServerGUI(QMainWindow):
         self.start_status_monitoring()
         
     def init_ui(self):
-        self.setWindowTitle("Máy Chủ Kiểm Tra Trùng Lặp - Quản Lý Cơ Sở Dữ Liệu")
-        self.setGeometry(100, 100, 800, 600)
+        self.setWindowTitle("Máy Chủ Kiểm Tra Trùng Lặp - Quản Lý License & Cơ Sở Dữ Liệu")
+        self.setGeometry(100, 100, 950, 900)
         
         # Set application icon
         self.setWindowIcon(QIcon())
         
-        # Central widget
+        # Central widget with scroll area
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
-        # Main layout
+        # Main layout for central widget
         main_layout = QVBoxLayout(central_widget)
         
+        # Create scroll area
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
+        # Create scrollable content widget
+        scrollable_widget = QWidget()
+        scroll_layout = QVBoxLayout(scrollable_widget)
+        
         # Title
-        title = QLabel("🗄️ Bảng Điều Khiển Máy Chủ Kiểm Tra Trùng Lặp")
+        title = QLabel("🗄️ Bảng Điều Khiển Máy Chủ Kiểm Tra Trùng Lặp & Quản Lý License")
         title_font = QFont()
         title_font.setPointSize(16)
         title_font.setBold(True)
         title.setFont(title_font)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(title)
+        scroll_layout.addWidget(title)
         
         # Server status group
         status_group = QGroupBox("Trạng Thái Máy Chủ")
@@ -112,7 +122,7 @@ class ServerGUI(QMainWindow):
         server_btn_layout.addWidget(self.stop_server_btn)
         status_layout.addLayout(server_btn_layout, 1, 0, 1, 2)
         
-        main_layout.addWidget(status_group)
+        scroll_layout.addWidget(status_group)
         
         # Database statistics group
         stats_group = QGroupBox("Thống Kê Cơ Sở Dữ Liệu")
@@ -135,7 +145,70 @@ class ServerGUI(QMainWindow):
         self.refresh_stats_btn.clicked.connect(self.refresh_stats)
         stats_layout.addWidget(self.refresh_stats_btn, 3, 0, 1, 2)
         
-        main_layout.addWidget(stats_group)
+        scroll_layout.addWidget(stats_group)
+        
+        # License management group
+        license_group = QGroupBox("Quản Lý License")
+        license_layout = QGridLayout(license_group)
+        
+        # Create license section
+        license_layout.addWidget(QLabel("Tạo License Mới:"), 0, 0)
+        
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("Nhập tên người dùng...")
+        license_layout.addWidget(QLabel("Tên người dùng:"), 1, 0)
+        license_layout.addWidget(self.username_input, 1, 1)
+        
+        self.days_valid_input = QLineEdit()
+        self.days_valid_input.setText("30")
+        self.days_valid_input.setPlaceholderText("Số ngày có hiệu lực...")
+        license_layout.addWidget(QLabel("Số ngày hiệu lực:"), 2, 0)
+        license_layout.addWidget(self.days_valid_input, 2, 1)
+        
+        self.create_license_btn = QPushButton("🔑 Tạo License Key")
+        self.create_license_btn.clicked.connect(self.create_license)
+        license_layout.addWidget(self.create_license_btn, 3, 0, 1, 2)
+        
+        # Validate license section
+        license_layout.addWidget(QLabel("Kiểm Tra License:"), 4, 0)
+        
+        self.license_key_input = QLineEdit()
+        self.license_key_input.setPlaceholderText("Nhập license key để kiểm tra...")
+        license_layout.addWidget(QLabel("License Key:"), 5, 0)
+        license_layout.addWidget(self.license_key_input, 5, 1)
+        
+        self.validate_license_btn = QPushButton("✅ Kiểm Tra License")
+        self.validate_license_btn.clicked.connect(self.validate_license)
+        license_layout.addWidget(self.validate_license_btn, 6, 0, 1, 1)
+        
+        self.list_licenses_btn = QPushButton("📋 Liệt Kê Tất Cả License")
+        self.list_licenses_btn.clicked.connect(self.list_all_licenses)
+        license_layout.addWidget(self.list_licenses_btn, 6, 1, 1, 1)
+        
+        # Remove license section
+        license_layout.addWidget(QLabel("Xóa License:"), 8, 0)
+        
+        self.remove_license_input = QLineEdit()
+        self.remove_license_input.setPlaceholderText("Nhập license key để xóa...")
+        license_layout.addWidget(QLabel("License cần xóa:"), 9, 0)
+        license_layout.addWidget(self.remove_license_input, 9, 1)
+        
+        self.remove_license_btn = QPushButton("🗑️ Xóa License")
+        self.remove_license_btn.clicked.connect(self.remove_license)
+        self.remove_license_btn.setStyleSheet("background-color: #ff6b6b; color: white;")
+        license_layout.addWidget(self.remove_license_btn, 10, 0, 1, 2)
+        
+        # License result display
+        self.license_result_label = QTextEdit()
+        self.license_result_label.setReadOnly(True)
+        self.license_result_label.setPlaceholderText("Kết quả sẽ hiển thị ở đây...")
+        self.license_result_label.setStyleSheet("padding: 10px; border: 1px solid #ccc; border-radius: 5px;")
+        self.license_result_label.setMinimumHeight(200)
+        self.license_result_label.setMaximumHeight(400)
+        license_layout.addWidget(self.license_result_label, 11, 0, 2, 2)
+
+        
+        scroll_layout.addWidget(license_group)
         
         # Data export group
         export_group = QGroupBox("Xuất Dữ Liệu")
@@ -167,7 +240,7 @@ class ServerGUI(QMainWindow):
         self.export_status_label = QLabel("")
         export_layout.addWidget(self.export_status_label)
         
-        main_layout.addWidget(export_group)
+        scroll_layout.addWidget(export_group)
         
         # Logs group
         logs_group = QGroupBox("Nhật Ký Máy Chủ")
@@ -183,17 +256,235 @@ class ServerGUI(QMainWindow):
         self.clear_logs_btn.clicked.connect(self.clear_logs)
         logs_layout.addWidget(self.clear_logs_btn)
         
-        main_layout.addWidget(logs_group)
+        scroll_layout.addWidget(logs_group)
         
         # Format info
         format_info = QLabel(
-            "📋 Định Dạng Dữ Liệu: 6số|tên_user|văn bản(tối đa 20 ký tự có dấu phẩy/khoảng trống)\n"
-            "Ví dụ: 363782|user1|Gg, ha, mi, co, am"
+            "📋 Định Dạng Dữ Liệu: Chỉ cần 6 số (ví dụ: 123456)\n"
+            "💾 Khi lưu sẽ có format: 6số|tên_user|thời_gian\n"
+            "🔑 Tất cả upload cần license key hợp lệ"
         )
-        format_info.setStyleSheet("padding: 10px; border-radius: 5px;")
-        main_layout.addWidget(format_info)
+        format_info.setStyleSheet("padding: 10px; border-radius: 5px; background-color: #f0f0f0;")
+        scroll_layout.addWidget(format_info)
+        
+        # Set the scrollable widget to the scroll area
+        scroll_area.setWidget(scrollable_widget)
+        main_layout.addWidget(scroll_area)
         
         self.add_log("Giao diện máy chủ đã khởi tạo")
+    
+    def create_license(self):
+        """Create a new license key."""
+        username = self.username_input.text().strip()
+        days_valid_str = self.days_valid_input.text().strip()
+        
+        if not username:
+            QMessageBox.warning(self, "Cảnh báo", "Vui lòng nhập tên người dùng")
+            return
+        
+        try:
+            days_valid = int(days_valid_str) if days_valid_str else 30
+            if days_valid <= 0:
+                raise ValueError("Số ngày phải lớn hơn 0")
+        except ValueError:
+            QMessageBox.warning(self, "Cảnh báo", "Số ngày hiệu lực phải là số nguyên dương")
+            return
+        
+        try:
+            # Create license using the checker
+            result = self.checker.create_license_key(username, days_valid)
+            
+            if result['success']:
+                license_key = result['key_id']
+                expires_at = result['expires_at']
+                
+                # Display result
+                result_text = (
+                    f"✅ Tạo license thành công!\n"
+                    f"👤 Username: {username}\n"
+                    f"🔑 License Key: {license_key}\n"
+                    f"📅 Hết hạn: {expires_at}\n"
+                    f"⏰ Có hiệu lực: {days_valid} ngày"
+                )
+                self.license_result_label.setPlainText(result_text)
+                
+                # Save license key to file for easy access
+                license_file = f"license_{username}.txt"
+                try:
+                    with open(license_file, 'w') as f:
+                        f.write(license_key)
+                    self.add_log(f"License key đã lưu vào file: {license_file}")
+                except:
+                    pass
+                
+                # Clear input fields
+                self.username_input.clear()
+                self.days_valid_input.setText("30")
+                
+                # Show success message with copy option
+                msg = QMessageBox(self)
+                msg.setWindowTitle("License Tạo Thành Công")
+                msg.setText(f"License key cho '{username}' đã được tạo!")
+                msg.setDetailedText(f"License Key: {license_key}")
+                msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+                msg.exec()
+                
+                self.add_log(f"Đã tạo license cho user '{username}', hiệu lực {days_valid} ngày")
+            else:
+                error_msg = result.get('error', 'Unknown error')
+                self.license_result_label.setPlainText(f"❌ Lỗi tạo license: {error_msg}")
+                self.add_log(f"Lỗi tạo license: {error_msg}")
+                
+        except Exception as e:
+            error_msg = str(e)
+            self.license_result_label.setPlainText(f"❌ Lỗi: {error_msg}")
+            self.add_log(f"Lỗi tạo license: {error_msg}")
+    
+    def validate_license(self):
+        """Validate a license key."""
+        license_key = self.license_key_input.text().strip()
+        
+        if not license_key:
+            QMessageBox.warning(self, "Cảnh báo", "Vui lòng nhập license key")
+            return
+        
+        try:
+            # Validate license using the checker
+            result = self.checker.validate_license_key(license_key)
+            
+            if result['valid']:
+                username = result['username']
+                expires_at = result['expires_at']
+                days_remaining = result['days_remaining']
+                
+                # Display result
+                status_icon = "✅" if days_remaining > 7 else "⚠️" if days_remaining > 0 else "❌"
+                result_text = (
+                    f"{status_icon} License hợp lệ!\n"
+                    f"👤 Username: {username}\n"
+                    f"📅 Hết hạn: {expires_at}\n"
+                    f"⏰ Còn lại: {days_remaining} ngày"
+                )
+                
+                if days_remaining <= 7:
+                    result_text += f"\n⚠️ License sắp hết hạn!"
+                
+                self.license_result_label.setPlainText(result_text)
+                self.add_log(f"License hợp lệ cho user '{username}', còn {days_remaining} ngày")
+            else:
+                error_msg = result.get('error', 'Unknown error')
+                result_text = f"❌ License không hợp lệ: {error_msg}"
+                self.license_result_label.setPlainText(result_text)
+                self.add_log(f"License không hợp lệ: {error_msg}")
+                
+        except Exception as e:
+            error_msg = str(e)
+            self.license_result_label.setPlainText(f"❌ Lỗi kiểm tra: {error_msg}")
+            self.add_log(f"Lỗi kiểm tra license: {error_msg}")
+    
+    def list_all_licenses(self):
+        """List all license keys in the database."""
+        try:
+            # Get licenses using the checker
+            licenses = self.checker.list_all_licenses()
+            
+            if not licenses:
+                self.license_result_label.setPlainText("📋 Không có license nào trong cơ sở dữ liệu")
+                self.add_log("Không có license nào trong database")
+                return
+            
+            # Format license list for display
+            result_text = f"📋 Danh sách {len(licenses)} license keys:\n\n"
+            
+            for i, license_info in enumerate(licenses, 1):
+                username = license_info['username']
+                key_id = license_info['key_id']
+                status = license_info['status']
+                expires_at = license_info['expires_at']
+                
+                # Status icon
+                if license_info['is_expired']:
+                    status_icon = "❌"
+                elif not license_info['is_active']:
+                    status_icon = "⚠️"
+                elif license_info['days_remaining'] <= 7:
+                    status_icon = "🟡"
+                else:
+                    status_icon = "✅"
+                
+                result_text += (
+                    f"{i}. {status_icon} {username}\n"
+                    f"   Key: {key_id}\n"
+                    f"   Status: {status}\n"
+                    f"   Expires: {expires_at[:10]}\n\n"
+                )
+            
+            self.license_result_label.setPlainText(result_text)
+            self.add_log(f"Liệt kê {len(licenses)} license keys")
+            
+        except Exception as e:
+            error_msg = str(e)
+            self.license_result_label.setPlainText(f"❌ Lỗi liệt kê license: {error_msg}")
+            self.add_log(f"Lỗi liệt kê license: {error_msg}")
+    
+    def remove_license(self):
+        """Remove a license key from the database."""
+        license_key = self.remove_license_input.text().strip()
+        
+        if not license_key:
+            QMessageBox.warning(self, "Cảnh báo", "Vui lòng nhập license key cần xóa")
+            return
+        
+        # Confirm deletion
+        reply = QMessageBox.question(
+            self,
+            "Xác Nhận Xóa License",
+            f"Bạn có chắc chắn muốn xóa license key này?\n\n{license_key[:8]}...{license_key[-8:] if len(license_key) > 16 else license_key[8:]}\n\nHành động này không thể hoàn tác!",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        try:
+            # Remove license using the checker
+            result = self.checker.remove_license_key(license_key)
+            
+            if result['success']:
+                username = result['username']
+                message = result['message']
+                
+                # Display success result
+                result_text = (
+                    f"✅ Xóa license thành công!\n"
+                    f"👤 Username: {username}\n"
+                    f"🔑 License Key: {license_key[:8]}...{license_key[-8:] if len(license_key) > 16 else license_key[8:]}\n"
+                    f"📝 {message}"
+                )
+                self.license_result_label.setPlainText(result_text)
+                
+                # Clear input field
+                self.remove_license_input.clear()
+                
+                # Show success message
+                QMessageBox.information(
+                    self,
+                    "Xóa Thành Công",
+                    f"License cho user '{username}' đã được xóa thành công!"
+                )
+                
+                self.add_log(f"Đã xóa license cho user '{username}'")
+            else:
+                error_msg = result.get('error', 'Unknown error')
+                result_text = f"❌ Lỗi xóa license: {error_msg}"
+                self.license_result_label.setPlainText(result_text)
+                self.add_log(f"Lỗi xóa license: {error_msg}")
+                
+        except Exception as e:
+            error_msg = str(e)
+            self.license_result_label.setPlainText(f"❌ Lỗi: {error_msg}")
+            self.add_log(f"Lỗi xóa license: {error_msg}")
     
     def start_status_monitoring(self):
         """Start background status monitoring."""
