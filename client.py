@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 from typing import Dict, Optional
 import requests
 import json
@@ -10,6 +11,65 @@ from PyQt6.QtWidgets import (
     QLineEdit, QComboBox, QGroupBox, QFormLayout, QCheckBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
+
+
+# ================= DATA TYPE VALIDATION =================
+
+class DataTypeValidator:
+    @staticmethod
+    def get_data_types():
+        """Get all available data types"""
+        return {
+            "kho1": "Kho 1: 6 số",
+            "kho2": "Kho 2: 6 số",
+            "kho3": "Kho 3: 6 số", 
+            "kho4": "Kho 4: 6 số",
+            "kho5": "Kho 5: 6 số",
+            "kho6": "Kho 6: 20 số (bắt đầu 9999)|2 số|2 số",
+            "kho7": "Kho 7: 20 số (bắt đầu 9999)|2 số|2 số",
+            "kho8": "Kho 8: 20 số (bắt đầu 9999)|2 số|2 số",
+            "kho9": "Kho 9: 20 số (bắt đầu 9999)|2 số|2 số",
+            "kho10": "Kho 10: 20 số (bắt đầu 9999)|2 số|2 số"
+        }
+    
+    @staticmethod
+    def validate_line(line: str, data_type: str) -> bool:
+        """Validate a line based on data type"""
+        line = line.strip()
+        if not line:
+            return False
+            
+        if data_type == "kho1":
+            # Current validation logic for kho1 - add your existing logic here
+            return len(line) > 0  # Placeholder - replace with actual validation
+        
+        elif data_type in ["kho2", "kho3", "kho4", "kho5"]:
+            # 6 numbers only
+            return re.match(r'^\d{6}$', line) is not None
+        
+        elif data_type in ["kho6", "kho7", "kho8", "kho9", "kho10"]:
+            # 20 numbers starting with 9999 | 2 numbers | 2 numbers
+            pattern = r'^9999\d{16}\|\d{2}\|\d{2}$'
+            return re.match(pattern, line) is not None
+            
+        return False
+    
+    @staticmethod
+    def get_validation_description(data_type: str) -> str:
+        """Get description of validation rules for data type"""
+        descriptions = {
+            "kho1": "Định dạng hiện tại",
+            "kho2": "Chính xác 6 số (ví dụ: 123456)",
+            "kho3": "Chính xác 6 số (ví dụ: 123456)", 
+            "kho4": "Chính xác 6 số (ví dụ: 123456)",
+            "kho5": "Chính xác 6 số (ví dụ: 123456)",
+            "kho6": "20 số bắt đầu 9999, theo sau |2 số|2 số (ví dụ: 99991234567890123456|12|34)",
+            "kho7": "20 số bắt đầu 9999, theo sau |2 số|2 số (ví dụ: 99991234567890123456|12|34)",
+            "kho8": "20 số bắt đầu 9999, theo sau |2 số|2 số (ví dụ: 99991234567890123456|12|34)",
+            "kho9": "20 số bắt đầu 9999, theo sau |2 số|2 số (ví dụ: 99991234567890123456|12|34)",
+            "kho10": "20 số bắt đầu 9999, theo sau |2 số|2 số (ví dụ: 99991234567890123456|12|34)"
+        }
+        return descriptions.get(data_type, "Không xác định")
 
 
 # ================= READ DOMAIN/LICENSE =================
@@ -45,18 +105,19 @@ class FileUploadThread(QThread):
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
 
-    def __init__(self, client, file_path, license_key, upload_mode, preprocess=False):
+    def __init__(self, client, file_path, license_key, upload_mode, preprocess=False, data_type="kho1"):
         super().__init__()
         self.client = client
         self.file_path = file_path
         self.license_key = license_key
         self.upload_mode = upload_mode
         self.preprocess = preprocess
+        self.data_type = data_type
 
     def run(self):
         try:
             if self.preprocess:
-                self.progress.emit("Đang tiền xử lý file (loại bỏ trùng lặp)...")
+                self.progress.emit(f"Đang tiền xử lý file (loại bỏ trùng lặp - {DataTypeValidator.get_data_types()[self.data_type]})...")
             else:
                 self.progress.emit("Đang upload file...")
             
@@ -65,7 +126,8 @@ class FileUploadThread(QThread):
                 self.license_key,
                 self.upload_mode,
                 self.progress,
-                self.preprocess
+                self.preprocess,
+                self.data_type
             )
 
             if result:
@@ -84,9 +146,10 @@ class DuplicateCheckerClient:
         self.server_url = server_url.rstrip('/')
         self.session = requests.Session()
     
-    def preprocess_file_remove_duplicates(self, file_path, progress_signal=None):
+    def preprocess_file_remove_duplicates(self, file_path, progress_signal=None, data_type="kho1"):
         """
         Removes duplicates from a file and overwrites the original file.
+        Also validates data format based on selected data type.
         Returns statistics about the operation.
         """
         try:
@@ -100,15 +163,23 @@ class DuplicateCheckerClient:
             original_count = len(lines)
             if progress_signal:
                 progress_signal.emit(f"Đã đọc {original_count} dòng từ file")
+                progress_signal.emit(f"Đang validation theo định dạng: {DataTypeValidator.get_data_types()[data_type]}")
             
-            # Remove duplicates while preserving order
+            # Remove duplicates while preserving order and validate format
             seen = set()
             unique_lines = []
             duplicate_lines = []
+            invalid_lines = []
             
             for line in lines:
                 stripped_line = line.strip()
                 if stripped_line:  # Skip empty lines
+                    # Validate format first
+                    if not DataTypeValidator.validate_line(stripped_line, data_type):
+                        invalid_lines.append(line)
+                        continue
+                    
+                    # Check for duplicates
                     if stripped_line not in seen:
                         seen.add(stripped_line)
                         unique_lines.append(line)
@@ -117,12 +188,14 @@ class DuplicateCheckerClient:
             
             unique_count = len(unique_lines)
             duplicate_count = len(duplicate_lines)
+            invalid_count = len(invalid_lines)
             
             if progress_signal:
+                progress_signal.emit(f"Tìm thấy {invalid_count} dòng sai định dạng")
                 progress_signal.emit(f"Tìm thấy {duplicate_count} dòng trùng lặp")
-                progress_signal.emit(f"Còn lại {unique_count} dòng duy nhất")
+                progress_signal.emit(f"Còn lại {unique_count} dòng hợp lệ và duy nhất")
             
-            # Overwrite the original file with unique lines only
+            # Overwrite the original file with unique and valid lines only
             if progress_signal:
                 progress_signal.emit("Đang ghi đè file gốc với dữ liệu đã lọc...")
             
@@ -134,7 +207,12 @@ class DuplicateCheckerClient:
                 'original_count': original_count,
                 'unique_count': unique_count,
                 'duplicate_count': duplicate_count,
-                'duplicates_removed': duplicate_lines
+                'invalid_count': invalid_count,
+                'data_type': data_type,
+                'data_type_description': DataTypeValidator.get_data_types()[data_type],
+                'validation_rule': DataTypeValidator.get_validation_description(data_type),
+                'duplicates_removed': duplicate_lines,
+                'invalid_removed': invalid_lines
             }
             
             if progress_signal:
@@ -168,7 +246,7 @@ class DuplicateCheckerClient:
         except Exception as e:
             return {'valid': False, 'error': str(e)}
 
-    def upload_file_with_progress(self, file_path, license_key, upload_mode, progress_signal=None, preprocess=False):
+    def upload_file_with_progress(self, file_path, license_key, upload_mode, progress_signal=None, preprocess=False, data_type="kho1"):
         try:
             if not os.path.exists(file_path):
                 return None
@@ -178,7 +256,7 @@ class DuplicateCheckerClient:
             # Preprocess file if requested
             if preprocess:
                 preprocess_stats = self.preprocess_file_remove_duplicates(
-                    file_path, progress_signal
+                    file_path, progress_signal, data_type
                 )
                 if progress_signal:
                     progress_signal.emit("Bắt đầu upload file đã xử lý...")
@@ -191,7 +269,8 @@ class DuplicateCheckerClient:
                 files = {'file': (os.path.basename(file_path), f, 'text/plain')}
                 data = {
                     'license_key': license_key,
-                    'mode': upload_mode
+                    'mode': upload_mode,
+                    'data_type': data_type
                 }
 
                 r = self.session.post(
@@ -274,6 +353,25 @@ class MainWindow(QWidget):
         upload_group = QGroupBox("Upload File")
         upload_layout = QVBoxLayout()
         
+        # Data type selection
+        data_type_layout = QHBoxLayout()
+        data_type_layout.addWidget(QLabel("Loại dữ liệu (Kho):"))
+        
+        self.data_type_combo = QComboBox()
+        data_types = DataTypeValidator.get_data_types()
+        for key, value in data_types.items():
+            self.data_type_combo.addItem(value, key)
+        self.data_type_combo.currentIndexChanged.connect(self.on_data_type_changed)
+        data_type_layout.addWidget(self.data_type_combo)
+        upload_layout.addLayout(data_type_layout)
+        
+        # Data type description
+        self.data_type_description = QLabel()
+        self.data_type_description.setWordWrap(True)
+        self.data_type_description.setStyleSheet("QLabel { color: #666; font-style: italic; padding: 5px; }")
+        self.update_data_type_description()
+        upload_layout.addWidget(self.data_type_description)
+        
         # Upload mode selection
         mode_layout = QHBoxLayout()
         mode_layout.addWidget(QLabel("Chế độ upload:"))
@@ -285,7 +383,7 @@ class MainWindow(QWidget):
         upload_layout.addLayout(mode_layout)
         
         # Preprocessing option
-        self.preprocess_checkbox = QCheckBox("🔄 Tự động loại bỏ trùng lặp trong file trước khi upload")
+        self.preprocess_checkbox = QCheckBox("🔄 Tự động loại bỏ trùng lặp và validate định dạng trước khi upload")
         self.preprocess_checkbox.setChecked(True)  # Enable by default
         upload_layout.addWidget(self.preprocess_checkbox)
         
@@ -319,6 +417,11 @@ class MainWindow(QWidget):
         self.save_preprocessed_button.setEnabled(False)
         btn_layout.addWidget(self.save_preprocessed_button)
 
+        self.save_invalid_preprocessed_button = QPushButton("💾 Lưu dữ liệu sai định dạng đã loại bỏ")
+        self.save_invalid_preprocessed_button.clicked.connect(self.save_invalid_preprocessed)
+        self.save_invalid_preprocessed_button.setEnabled(False)
+        btn_layout.addWidget(self.save_invalid_preprocessed_button)
+
         layout.addLayout(btn_layout)
 
         self.result_area = QTextEdit()
@@ -336,6 +439,21 @@ class MainWindow(QWidget):
         # Auto-validate license if present
         if license_key:
             self.validate_license()
+
+    # ================= DATA TYPE METHODS =================
+    
+    def on_data_type_changed(self):
+        """Called when data type selection changes"""
+        self.update_data_type_description()
+    
+    def update_data_type_description(self):
+        """Update the description label for the selected data type"""
+        current_data_type = self.data_type_combo.currentData()
+        if current_data_type:
+            description = DataTypeValidator.get_validation_description(current_data_type)
+            self.data_type_description.setText(f"📋 Định dạng: {description}")
+        else:
+            self.data_type_description.setText("")
 
     # ================= LICENSE MANAGEMENT =================
 
@@ -408,25 +526,29 @@ class MainWindow(QWidget):
             license_key = self.license_input.text().strip()
             upload_mode = self.mode_combo.currentData()
             preprocess = self.preprocess_checkbox.isChecked()
-            self.start_upload(file_path, license_key, upload_mode, preprocess)
+            data_type = self.data_type_combo.currentData()
+            self.start_upload(file_path, license_key, upload_mode, preprocess, data_type)
 
     # ================= START THREAD =================
 
-    def start_upload(self, file_path, license_key, upload_mode, preprocess=False):
+    def start_upload(self, file_path, license_key, upload_mode, preprocess=False, data_type="kho1"):
         self.upload_button.setEnabled(False)
         self.result_area.clear()
         self.status_label.setText("⏳ Đang xử lý...")
 
         mode_text = "Lưu dữ liệu" if upload_mode == "save" else "Chỉ kiểm tra"
         preprocess_text = " (có tiền xử lý)" if preprocess else " (không tiền xử lý)"
+        data_type_text = DataTypeValidator.get_data_types().get(data_type, data_type)
         self.result_area.append(f"Chế độ: {mode_text}{preprocess_text}")
+        self.result_area.append(f"Loại dữ liệu: {data_type_text}")
 
         self.upload_thread = FileUploadThread(
             self.client, 
             file_path, 
             license_key, 
             upload_mode,
-            preprocess
+            preprocess,
+            data_type
         )
         self.upload_thread.progress.connect(self.result_area.append)
         self.upload_thread.finished.connect(self.upload_finished)
@@ -480,9 +602,12 @@ class MainWindow(QWidget):
             prep_stats = result['preprocessing_stats']
             output += (
                 f"\n--- TIỀN XỬ LÝ ---\n"
+                f"Loại dữ liệu: {prep_stats.get('data_type_description', 'N/A')}\n"
+                f"Định dạng: {prep_stats.get('validation_rule', 'N/A')}\n"
                 f"Dòng gốc trong file: {prep_stats['original_count']}\n"
+                f"Dòng sai định dạng loại bỏ: {prep_stats.get('invalid_count', 0)}\n"
                 f"Dòng trùng lặp loại bỏ: {prep_stats['duplicate_count']}\n"
-                f"Dòng còn lại: {prep_stats['unique_count']}\n\n"
+                f"Dòng hợp lệ còn lại: {prep_stats['unique_count']}\n\n"
             )
         
         output += (
@@ -507,6 +632,13 @@ class MainWindow(QWidget):
             result['preprocessing_stats']['duplicate_count'] > 0
         )
         self.save_preprocessed_button.setEnabled(has_preprocessed_duplicates)
+        
+        # Enable preprocessed invalid button if preprocessing was used and invalid data were found
+        has_preprocessed_invalid = (
+            'preprocessing_stats' in result and 
+            result['preprocessing_stats'].get('invalid_count', 0) > 0
+        )
+        self.save_invalid_preprocessed_button.setEnabled(has_preprocessed_invalid)
         
         if not save_mode:
             self.result_area.append("⚠️ Dữ liệu không được lưu vào server (chế độ kiểm tra)")
@@ -546,6 +678,34 @@ class MainWindow(QWidget):
                     self,
                     "Thành công",
                     f"Đã lưu {len(duplicates)} dòng trùng lặp đã loại bỏ"
+                )
+            except Exception as e:
+                QMessageBox.critical(self, "Lỗi", str(e))
+
+    def save_invalid_preprocessed(self):
+        """Save the invalid format data that were removed during preprocessing"""
+        if not self.last_result or 'preprocessing_stats' not in self.last_result:
+            QMessageBox.warning(self, "Lỗi", "Không có dữ liệu sai định dạng từ tiền xử lý để lưu")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Lưu file dữ liệu sai định dạng đã loại bỏ",
+            "preprocessed_invalid.txt",
+            "Text Files (*.txt)"
+        )
+
+        if file_path:
+            try:
+                invalid_data = self.last_result['preprocessing_stats']['invalid_removed']
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    for line in invalid_data:
+                        f.write(line)  # line already contains newline
+
+                QMessageBox.information(
+                    self,
+                    "Thành công",
+                    f"Đã lưu {len(invalid_data)} dòng sai định dạng đã loại bỏ"
                 )
             except Exception as e:
                 QMessageBox.critical(self, "Lỗi", str(e))

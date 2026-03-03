@@ -13,13 +13,13 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
     QPushButton, QLabel, QTextEdit, QWidget, QFileDialog,
     QMessageBox, QProgressBar, QGroupBox, QGridLayout,
-    QLineEdit, QScrollArea, QSizePolicy
+    QLineEdit, QScrollArea, QSizePolicy, QComboBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QIcon
 
 # Import the server components
-from server import OptimizedDuplicateChecker, app, checker
+from server import OptimizedDuplicateChecker, app, checker, DataTypeValidator
 
 class ServerStatusThread(QThread):
     status_updated = pyqtSignal(dict)
@@ -46,15 +46,20 @@ class ExportThread(QThread):
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
     
-    def __init__(self, checker, output_file):
+    def __init__(self, checker, output_file, data_type=None):
         super().__init__()
         self.checker = checker
         self.output_file = output_file
+        self.data_type = data_type
     
     def run(self):
         try:
-            self.progress.emit("Đang xuất dữ liệu...")
-            result = self.checker.export_all_data_to_file(self.output_file)
+            if self.data_type and self.data_type != "all":
+                self.progress.emit(f"Đang xuất dữ liệu loại {self.data_type}...")
+                result = self.checker.export_data_by_type(self.output_file, self.data_type)
+            else:
+                self.progress.emit("Đang xuất toàn bộ dữ liệu...")
+                result = self.checker.export_all_data_to_file(self.output_file)
             self.finished.emit(result)
         except Exception as e:
             self.error.emit(str(e))
@@ -141,9 +146,15 @@ class ServerGUI(QMainWindow):
         stats_layout.addWidget(QLabel("Cập Nhật Lần Cuối:"), 2, 0)
         stats_layout.addWidget(self.last_updated_label, 2, 1)
         
+        # Stats by type display
+        self.stats_by_type_label = QLabel("Chưa có dữ liệu")
+        self.stats_by_type_label.setWordWrap(True)
+        stats_layout.addWidget(QLabel("Thống kê theo loại:"), 3, 0)
+        stats_layout.addWidget(self.stats_by_type_label, 3, 1)
+        
         self.refresh_stats_btn = QPushButton("🔄 Làm Mới Thống Kê")
         self.refresh_stats_btn.clicked.connect(self.refresh_stats)
-        stats_layout.addWidget(self.refresh_stats_btn, 3, 0, 1, 2)
+        stats_layout.addWidget(self.refresh_stats_btn, 4, 0, 1, 2)
         
         scroll_layout.addWidget(stats_group)
         
@@ -214,6 +225,20 @@ class ServerGUI(QMainWindow):
         export_group = QGroupBox("Xuất Dữ Liệu")
         export_layout = QVBoxLayout(export_group)
         
+        # Data type selection for export
+        type_layout = QHBoxLayout()
+        type_layout.addWidget(QLabel("Loại dữ liệu:"))
+        self.export_type_combo = QComboBox()
+        self.export_type_combo.addItem("Tất cả loại dữ liệu", "all")
+        
+        # Add available data types
+        data_types = DataTypeValidator.get_data_types()
+        for key, value in data_types.items():
+            self.export_type_combo.addItem(value, key)
+        
+        type_layout.addWidget(self.export_type_combo)
+        export_layout.addLayout(type_layout)
+        
         # Export file path
         path_layout = QHBoxLayout()
         path_layout.addWidget(QLabel("Xuất đến:"))
@@ -228,7 +253,7 @@ class ServerGUI(QMainWindow):
         export_layout.addLayout(path_layout)
         
         # Export button
-        self.export_btn = QPushButton("📤 Xuất Toàn Bộ Cơ Sở Dữ Liệu Ra File")
+        self.export_btn = QPushButton("📤 Xuất Cơ Sở Dữ Liệu Ra File")
         self.export_btn.clicked.connect(self.export_data)
         export_layout.addWidget(self.export_btn)
         
@@ -260,9 +285,11 @@ class ServerGUI(QMainWindow):
         
         # Format info
         format_info = QLabel(
-            "📋 Định Dạng Dữ Liệu: Chỉ cần 6 số (ví dụ: 123456)\n"
-            "💾 Khi lưu sẽ có format: 6số|tên_user|thời_gian\n"
-            "🔑 Tất cả upload cần license key hợp lệ"
+            "📋 Các Loại Dữ Liệu Hỗ Trợ:\n"
+            "🏪 Kho 1-5: 6 số (ví dụ: 123456)\n"
+            "🏪 Kho 6-10: 20 số bắt đầu 9999|2 số|2 số (ví dụ: 99991234567890123456|12|34)\n"
+            "💾 Khi lưu sẽ có format: dữ_liệu|tên_user|thời_gian\n"
+            "🔑 Tất cả upload cần license key hợp lệ và chọn đúng loại kho"
         )
         format_info.setStyleSheet("padding: 10px; border-radius: 5px; background-color: #f0f0f0;")
         scroll_layout.addWidget(format_info)
@@ -537,6 +564,20 @@ class ServerGUI(QMainWindow):
         self.total_records_label.setText(f"{stats['total_records']:,}")
         self.db_size_label.setText(f"{stats['database_size_mb']:.2f} MB")
         self.last_updated_label.setText(time.strftime("%H:%M:%S"))
+        
+        # Update stats by type
+        records_by_type = stats.get('records_by_type', {})
+        if records_by_type:
+            data_types = DataTypeValidator.get_data_types()
+            type_stats_text = []
+            
+            for data_type, count in records_by_type.items():
+                type_name = data_types.get(data_type, data_type)
+                type_stats_text.append(f"{type_name}: {count:,}")
+            
+            self.stats_by_type_label.setText(" | ".join(type_stats_text))
+        else:
+            self.stats_by_type_label.setText("Chưa có dữ liệu theo loại")
     
     def browse_export_path(self):
         """Browse for export file location."""
@@ -551,20 +592,41 @@ class ServerGUI(QMainWindow):
             self.export_path_edit.setText(file_path)
     
     def export_data(self):
-        """Export all database data to file."""
+        """Export database data to file based on selected data type."""
         output_file = self.export_path_edit.text().strip()
         
         if not output_file:
             QMessageBox.warning(self, "Cảnh Báo", "Vui lòng chỉ định đường dẫn file xuất")
             return
         
-        # Confirm large export
+        # Get selected data type
+        selected_type = self.export_type_combo.currentData()
+        selected_type_text = self.export_type_combo.currentText()
+        
+        # Get statistics for confirmation
         stats = self.checker.get_stats()
-        if stats['total_records'] > 100000:
+        
+        # Calculate records to export
+        if selected_type == "all":
+            records_to_export = stats['total_records']
+        else:
+            records_by_type = stats.get('records_by_type', {})
+            records_to_export = records_by_type.get(selected_type, 0)
+            
+        if records_to_export == 0:
+            QMessageBox.information(
+                self,
+                "Không Có Dữ Liệu", 
+                f"Không có dữ liệu nào cho loại '{selected_type_text}' để xuất."
+            )
+            return
+        
+        # Confirm large export
+        if records_to_export > 100000:
             reply = QMessageBox.question(
                 self,
                 "Xuất Dữ Liệu Lớn",
-                f"Bạn sắp xuất {stats['total_records']:,} bản ghi. "
+                f"Bạn sắp xuất {records_to_export:,} bản ghi cho '{selected_type_text}'. "
                 f"Điều này có thể mất thời gian. Tiếp tục?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
@@ -576,13 +638,13 @@ class ServerGUI(QMainWindow):
         self.export_progress.setVisible(True)
         self.export_progress.setRange(0, 0)  # Indeterminate
         
-        self.export_thread = ExportThread(self.checker, output_file)
+        self.export_thread = ExportThread(self.checker, output_file, selected_type)
         self.export_thread.progress.connect(self.update_export_progress)
         self.export_thread.finished.connect(self.export_finished)
         self.export_thread.error.connect(self.export_error)
         self.export_thread.start()
         
-        self.add_log(f"Đang bắt đầu xuất đến {output_file}")
+        self.add_log(f"Đang bắt đầu xuất {selected_type_text} đến {output_file}")
     
     def update_export_progress(self, message):
         """Update export progress."""
@@ -596,14 +658,27 @@ class ServerGUI(QMainWindow):
         self.export_status_label.setText("")
         
         if result['success']:
+            # Prepare success message
+            message_parts = [
+                f"Đã xuất thành công {result['exported_count']:,} bản ghi",
+                f"Tập tin: {result['exported_file']}",
+                f"Kích thước: {result['file_size_mb']:.2f} MB"
+            ]
+            
+            # Add data type info if available
+            if 'data_type_description' in result:
+                message_parts.insert(0, f"Loại dữ liệu: {result['data_type_description']}")
+            
             QMessageBox.information(
                 self,
                 "Xuất Thành Công",
-                f"Đã xuất thành công {result['exported_count']:,} bản ghi\n"
-                f"Tập tin: {result['exported_file']}\n"
-                f"Kích thước: {result['file_size_mb']:.2f} MB"
+                "\n".join(message_parts)
             )
-            self.add_log(f"Xuất hoàn tất: {result['exported_count']:,} bản ghi")
+            
+            if 'data_type' in result:
+                self.add_log(f"Xuất hoàn tất loại {result['data_type']}: {result['exported_count']:,} bản ghi")
+            else:
+                self.add_log(f"Xuất hoàn tất tất cả: {result['exported_count']:,} bản ghi")
         else:
             QMessageBox.critical(self, "Xuất Thất Bại", f"Xuất thất bại: {result['error']}")
             self.add_log(f"Xuất thất bại: {result['error']}")
